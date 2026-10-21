@@ -17,7 +17,7 @@
   },
   "navbar": {
     "primary": {
-      "label": "Get started",
+      "label": "Deploy your first subgraph",
       "href": "/quickstart"
     }
   },
@@ -27,11 +27,10 @@
       "groups": [
         {
           "group": "Get started",
-          "pages": ["introduction", "quickstart"]
-        },
-        {
-          "group": "Design your docs",
-          "pages": ["components", "customization"]
+          "pages": [
+            "introduction",
+            "quickstart"
+          ]
         }
       ]
     },
@@ -39,26 +38,12 @@
       "tab": "Guides",
       "groups": [
         {
-          "group": "Work with Thally",
+          "group": "Operate",
           "pages": [
-            "guides/create-a-site",
-            "guides/work-with-the-cli",
-            "guides/connect-ai-tools"
+            "guides/debug-a-failed-subgraph"
           ]
         }
       ]
-    },
-    {
-      "tab": "API Reference",
-      "groups": [
-        {
-          "group": "Overview",
-          "pages": ["api/introduction", "api/authentication"]
-        }
-      ],
-      "api": {
-        "source": "openapi.yaml"
-      }
     },
     {
       "tab": "Changelog",

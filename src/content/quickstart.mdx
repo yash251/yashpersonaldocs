@@ -1,47 +1,178 @@
 ---
 title: Quickstart
-description: Guide a new reader through one useful workflow and show them how to verify it.
+description: Deploy a subgraph for a verified Ethereum contract to Subgraph Studio and run your first GraphQL query.
 ---
 
-A strong quickstart produces one meaningful result. Replace the placeholders
-below with the shortest supported path for your product.
+By the end of this page you will have a live subgraph indexing the
+[Gravity contract](https://etherscan.io/address/0x2E645469f354BB4F5c8a05B3b30A929361cf85eC)
+on Ethereum mainnet, and you will have queried it from the Studio playground.
+Gravity is a tiny contract with two events, so it indexes quickly and keeps
+the focus on the workflow rather than the data.
 
 ## Before you begin
 
-List only the requirements needed for this workflow:
-
-- An account or credential, when required
-- A supported runtime, device, browser, or operating system
-- Permission to create or change the resource used in the example
+- **Node.js 20 or newer.** Check with `node --version`.
+- **A wallet** (MetaMask or any WalletConnect wallet) to sign in to
+  Subgraph Studio. Signing in is free and sends no transaction.
+- About 15 minutes.
 
 <Steps>
-  <Step title="Install the required tool">
-    Give readers one recommended installation command.
+  <Step title="Install the Graph CLI">
+    <Tabs>
+      <Tab title="npm">
+        ```bash
+        npm install -g @graphprotocol/graph-cli@latest
+        ```
+      </Tab>
+      <Tab title="yarn">
+        ```bash
+        yarn global add @graphprotocol/graph-cli
+        ```
+      </Tab>
+    </Tabs>
+
+    Confirm it is on your path:
 
     ```bash
-    npm install your-package
+    graph --version
     ```
+
+    If the command is not found, your global npm bin directory is not on
+    `PATH`. Run `npm config get prefix` and add `<prefix>/bin` to your shell
+    profile.
   </Step>
-  <Step title="Add the minimum configuration">
-    Include only the values needed for the first successful run.
+
+  <Step title="Create the subgraph in Subgraph Studio">
+    1. Open [Subgraph Studio](https://thegraph.com/studio/) and connect your
+       wallet.
+    2. Select **Create a Subgraph**.
+    3. Name it `Gravity Mainnet`. Studio turns this into a slug such as
+       `gravity-mainnet`. Keep the page open; you need the slug and the
+       **Deploy Key** in later steps.
+
+    <Note type="warning" title="Free accounts hold three unpublished subgraphs">
+      Studio allows up to three deployed but unpublished subgraphs per
+      account. If you hit the limit, archive an old one from its Studio
+      page before deploying a new one.
+    </Note>
+  </Step>
+
+  <Step title="Scaffold the project">
+    Run `graph init` and answer the prompts. The CLI fetches the ABI from
+    Etherscan for verified contracts and reads the contract's creation block
+    as the suggested start block.
 
     ```bash
-    your-cli init
+    graph init
     ```
-  </Step>
-  <Step title="Complete the first task">
-    Use a realistic example that produces an observable result.
+
+    Use these answers:
+
+    | Prompt | Answer |
+    | --- | --- |
+    | Protocol | `ethereum` |
+    | Subgraph slug | `gravity-mainnet` (your slug from Studio) |
+    | Directory to create the subgraph in | `gravity-mainnet` |
+    | Ethereum network | `mainnet` |
+    | Contract address | `0x2E645469f354BB4F5c8a05B3b30A929361cf85eC` |
+    | ABI | Leave as fetched from Etherscan |
+    | Start block | `6175244` |
+    | Contract name | `Gravity` |
+    | Index contract events as entities | `true` |
+    | Add another contract? | `false` |
+
+    Choosing **Index contract events as entities** generates a schema with
+    one entity per event (`NewGravatar`, `UpdatedGravatar`) and mapping
+    handlers that store each event as it arrives. That is enough for a
+    first deploy.
+
+    When it finishes, move into the project:
 
     ```bash
-    your-cli start
+    cd gravity-mainnet
     ```
   </Step>
-  <Step title="Verify the result">
-    State exactly what the reader should see and how to recover when it does not appear.
+
+  <Step title="Generate types and build">
+    ```bash
+    graph codegen && graph build
+    ```
+
+    `codegen` writes TypeScript types for your schema and the contract ABI
+    into `generated/`. `build` compiles the mappings to WebAssembly and
+    validates the manifest. A successful build ends with:
+
+    ```text
+    ✔ Compile subgraph
+    Build completed: build/subgraph.yaml
+    ```
+
+    If the build fails, the error names the file and line. The most common
+    cause on a fresh scaffold is editing `schema.graphql` and forgetting to
+    rerun `graph codegen`.
+  </Step>
+
+  <Step title="Authenticate and deploy">
+    Copy the **Deploy Key** from your subgraph's page in Studio, then:
+
+    ```bash
+    graph auth <DEPLOY_KEY>
+    graph deploy gravity-mainnet
+    ```
+
+    When prompted for a version label, enter `v0.0.1`. The CLI uploads the
+    build to IPFS and registers it with Studio. The output ends with the
+    deployment ID (starts with `Qm`) and the query URL. Keep the deployment
+    ID; the debugging guide uses it.
+
+    <Note type="info" title="Deploying is not publishing">
+      `graph deploy` sends your subgraph to Studio's hosted dev environment
+      only. Publishing to the decentralized network is a separate, onchain
+      step from the Studio UI and is outside this quickstart.
+    </Note>
+  </Step>
+
+  <Step title="Verify with a query">
+    Back in Studio, your subgraph page shows a status chip that moves from
+    **Deploying** to **Syncing** to **Synced**. Gravity has few events, so
+    the dev indexer usually reaches the chain head within a few minutes.
+    You can query while it is still syncing; results simply stop at the
+    latest indexed block.
+
+    Open the **Playground** tab and run:
+
+    ```graphql
+    {
+      newGravatars(first: 5, orderBy: blockNumber, orderDirection: asc) {
+        id
+        owner
+        displayName
+        imageUrl
+        blockNumber
+      }
+    }
+    ```
+
+    You should see five entities, the earliest from block `6175244`. If
+    `newGravatars` returns an empty list, wait a minute and retry; the
+    first results appear as soon as the indexer passes the start block.
+
+    To query from code, use the development query URL shown on the Studio
+    page. The dev URL is rate limited to 3,000 queries per day, which is
+    fine for testing but not for production traffic.
   </Step>
 </Steps>
 
-## Choose the next task
+## What you just built
 
-Link to the guide that naturally follows this result. Avoid ending the reader’s
-journey with a generic list of every feature.
+- A manifest that tells indexers to watch one contract from block 6175244.
+- A schema with one entity per event.
+- Handlers that write one entity per emitted event.
+- A versioned deployment in Studio with a query endpoint.
+
+## Next step
+
+A fresh subgraph rarely fails. One you have customised does. Read
+[Debug a failed subgraph](/guides/debug-a-failed-subgraph) before you edit
+the mappings, so you know how to read the indexing status when something
+goes wrong.

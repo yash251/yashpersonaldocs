@@ -1,45 +1,66 @@
 ---
 title: Introduction
-description: Give readers a clear path from their first question to a result they can verify.
+description: What subgraphs are, who this handbook is for, and where to start.
 mode: home
 ---
 
 <Hero
-  title="Build documentation around the reader"
-  subtitle="Start with a useful first result, organize what follows, and publish every format from one reviewable source."
-  primaryLabel="Get started"
+  title="Subgraph Handbook"
+  subtitle="Build, deploy, and debug subgraphs on The Graph. Written from the support queue, so it covers what actually breaks."
+  primaryLabel="Deploy your first subgraph"
   primaryHref="/quickstart"
-  secondaryLabel="Publish your docs"
-  secondaryHref="/guides/create-a-site"
+  secondaryLabel="Debug a failed subgraph"
+  secondaryHref="/guides/debug-a-failed-subgraph"
 />
 
-## Build the reader journey
+## What a subgraph does
 
-Begin with the task that brings most readers to your documentation, then make
-the next useful step obvious.
+A subgraph is an open API that turns raw blockchain data into a queryable
+GraphQL endpoint. You describe which smart contract events you care about,
+write small mapping functions that transform those events into entities, and
+The Graph's indexers do the heavy lifting of scanning the chain, storing the
+results, and serving queries.
+
+Without a subgraph, an app that wants "every transfer of this token, sorted by
+value" has to crawl blocks with an RPC node, decode logs, and maintain its own
+database. With one, that is a single GraphQL query.
+
+A subgraph is made of three files:
+
+| File | Purpose |
+| --- | --- |
+| `subgraph.yaml` | The manifest. Which contract, which network, which events, and where indexing starts. |
+| `schema.graphql` | The entities you want to store and query. |
+| `src/mapping.ts` | AssemblyScript handlers that turn each event into entity writes. |
+
+## Who this is for
+
+- **Frontend and full-stack developers** who need indexed onchain data in an
+  app and do not want to run indexing infrastructure.
+- **Smart contract developers** who want a queryable view of their protocol
+  for dashboards, analytics, or integrations.
+- **Anyone whose subgraph is stuck or failing.** The debugging guide is built
+  from the most common tickets seen in production support.
+
+You should be comfortable with a terminal, Node.js, and basic GraphQL. You do
+not need to know AssemblyScript in advance.
+
+## Pick your path
 
 <CardGroup cols="2">
-  <Card title="Write your quickstart" icon="party-horn" href="/quickstart">
-    Turn prerequisites, setup, one realistic task, and verification into a short path.
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Deploy a working subgraph for a verified mainnet contract and run your
+    first query in about 15 minutes.
   </Card>
-  <Card title="Organize your navigation" icon="grid-round" href="/customization">
-    Group related tasks and references around how people use your product.
-  </Card>
-  <Card title="Document your API" icon="code-simple" href="/api">
-    Replace `openapi.yaml` to publish browsable endpoint docs with a live playground.
-  </Card>
-  <Card title="Learn the Thally workflow" icon="wrench" href="/guides/create-a-site">
-    Create, publish, and update sites from the Cloud dashboard, the CLI, or your AI tools.
+  <Card title="Debug a failed subgraph" icon="bug" href="/guides/debug-a-failed-subgraph">
+    Read the indexing status, decode the fatal error, and apply the fix for
+    the most common failure modes.
   </Card>
 </CardGroup>
 
-## Publish from one source
-
-Thally turns the same reviewed content into HTML, search, agent discovery files,
-Markdown mirrors, and a read-only MCP surface — so people and AI tools read the
-same, current answer. Add only the locales your readers need.
-
-<Note type="info" title="Start with the product, not the template">
-  Replace this page with the questions, terminology, and workflows your readers
-  already use. Keep `docs.json` focused on the path between those tasks.
+<Note type="info" title="Scope of this handbook">
+  This site focuses on the developer workflow with `graph-cli` and Subgraph
+  Studio. For the full protocol reference, including publishing to the
+  decentralized network and curation, use the
+  [official docs](https://thegraph.com/docs/en/).
 </Note>

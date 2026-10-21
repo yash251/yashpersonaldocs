@@ -176,12 +176,12 @@ const templateSiteConfig: SiteConfig = {
 // Managed by Thally Cloud onboarding.
 export const siteConfig: SiteConfig = {
   ...templateSiteConfig,
-  name: "yashpersonal",
-  description: "Assignment",
+  name: "Subgraph Handbook",
+  description: "A practical guide to building, deploying, and debugging subgraphs on The Graph.",
   repoUrl: "https://github.com/yash251/yashpersonaldocs",
   links: [
-    { label: "Get started", href: "/quickstart" },
-    { label: "Support", href: "https://github.com/yash251/yashpersonaldocs/issues/new" },
+    { label: "Quickstart", href: "/quickstart" },
+    { label: "Debug a failed subgraph", href: "/guides/debug-a-failed-subgraph" },
     { label: "GitHub", href: "https://github.com/yash251/yashpersonaldocs" },
     { label: "Changelog", href: "/changelog" },
   ],

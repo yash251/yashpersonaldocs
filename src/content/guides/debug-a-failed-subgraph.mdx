@@ -1,0 +1,242 @@
+---
+title: Debug a failed subgraph
+description: Read the indexing status, decode the fatal error, and fix the failure modes that account for most support tickets.
+---
+
+A subgraph that fails stops at the block where the error happened. Queries
+still work against data indexed up to that block, which is why failures are
+easy to miss until someone notices the data is stale. This guide shows how to
+confirm a failure, find the exact cause, and fix the common ones.
+
+## Before you begin
+
+- A subgraph deployed to Subgraph Studio, and its **deployment ID** (the
+  `Qm…` hash printed by `graph deploy` and shown on the Studio page).
+- `graph-cli` installed locally, as in the [Quickstart](/quickstart).
+- `curl` or any GraphQL client.
+
+## Step 1: Confirm the subgraph has actually failed
+
+Studio shows a red **Failed** chip on the subgraph page. For the detail you
+need, query the index node directly. This works for any deployment and gives
+you the failing block, the handler, and the full error message in one call.
+
+```bash
+curl -s https://api.thegraph.com/index-node/graphql \
+  -H 'content-type: application/json' \
+  -d '{"query":"{ indexingStatuses(subgraphs: [\"<DEPLOYMENT_ID>\"]) { subgraph synced health fatalError { message block { number hash } handler deterministic } nonFatalErrors { message } chains { network chainHeadBlock { number } latestBlock { number } earliestBlock { number } } } }"}'
+```
+
+Read the response like this:
+
+| Field | Meaning |
+| --- | --- |
+| `health` | `healthy`, `unhealthy` (non-fatal errors, still indexing), or `failed`. |
+| `synced` | `true` once `latestBlock` has caught up with `chainHeadBlock`. |
+| `fatalError.message` | The error that stopped indexing. This is what you are debugging. |
+| `fatalError.block.number` | The block where it stopped. You will need it to reproduce. |
+| `fatalError.handler` | The mapping handler that was running. |
+| `fatalError.deterministic` | `true` means the same input always fails (a mapping bug). `false` means an infrastructure problem such as an RPC timeout, and a redeploy may clear it. |
+| `chains[0].latestBlock` | How far indexing got. A subgraph that is `healthy` but far behind `chainHeadBlock` is slow, not broken. |
+
+<Tip>
+  If `health` is `healthy` and `latestBlock` is advancing on each call, nothing
+  is wrong. Large start-to-head ranges on busy contracts can take hours. Check
+  the **start block** section below before assuming a failure.
+</Tip>
+
+## Step 2: Match the error to a cause
+
+The table below covers the failure messages that come up most often. Each row
+links to a fix further down.
+
+| Error contains | Likely cause |
+| --- | --- |
+| `unexpected null in handler` or `Mapping aborted at … line …` | A handler called `.load()` and used the result without a null check. [Fix](#null-entity-after-load) |
+| `Entity … has no field` or `Unknown field` | `schema.graphql` changed but `graph codegen` was not rerun, or the build used stale `generated/` types. [Fix](#stale-generated-types) |
+| `Failed to decode event` or `Event … not found in ABI` | The manifest `eventHandlers.event` signature does not match the ABI exactly. [Fix](#event-signature-mismatch) |
+| `ethereum call reverted` or `Call reverted` | A contract read in a handler reverted at that block. [Fix](#reverted-contract-calls) |
+| `Subgraph not found` or `Unauthorized` at deploy time | Wrong deploy key, or the slug does not match the Studio subgraph. [Fix](#deploy-rejected) |
+| Indexing is `healthy` but entities are missing | Start block is after the first relevant event, or `startBlock` was set to a later block for speed. [Fix](#missing-early-data) |
+
+## Fixes
+
+### Null entity after load
+
+`Entity.load(id)` returns `null` when no entity with that ID exists yet. This
+is the single most common deterministic failure. Always branch on the result.
+
+```ts
+// src/mapping.ts
+import { UpdatedGravatar as UpdatedGravatarEvent } from '../generated/Gravity/Gravity'
+import { Gravatar } from '../generated/schema'
+
+export function handleUpdatedGravatar(event: UpdatedGravatarEvent): void {
+  let gravatar = Gravatar.load(event.params.id.toHexString())
+  if (gravatar == null) {
+    // Reached when an update arrives for an ID we never saw created,
+    // for example because startBlock is after the creation event.
+    gravatar = new Gravatar(event.params.id.toHexString())
+    gravatar.owner = event.params.owner
+  }
+  gravatar.displayName = event.params.displayName
+  gravatar.imageUrl = event.params.imageUrl
+  gravatar.save()
+}
+```
+
+Creating the entity on a miss is usually the right behaviour. If the entity
+really must exist, log and return instead of throwing, so one bad event does
+not halt the whole subgraph:
+
+```ts
+import { log } from '@graphprotocol/graph-ts'
+
+if (gravatar == null) {
+  log.warning('Gravatar {} not found at block {}', [
+    event.params.id.toHexString(),
+    event.block.number.toString(),
+  ])
+  return
+}
+```
+
+### Stale generated types
+
+The `generated/` directory is a build artifact. After any change to
+`schema.graphql` or to an ABI, regenerate it before building:
+
+```bash
+graph codegen && graph build
+```
+
+Add `generated/` to `.gitignore` so a teammate's checkout cannot carry stale
+types. If the error persists, delete the directory and run `codegen` again.
+
+### Event signature mismatch
+
+The `event` string in `subgraph.yaml` must match the ABI's event declaration
+exactly, including parameter types and the `indexed` keyword.
+
+```yaml
+# subgraph.yaml
+eventHandlers:
+  - event: NewGravatar(uint256,address,string,string)
+    handler: handleNewGravatar
+  - event: UpdatedGravatar(uint256,address,string,string)
+    handler: handleUpdatedGravatar
+```
+
+Two things commonly go wrong:
+
+- **Parameter names instead of types.** `NewGravatar(id,owner,…)` is invalid.
+  Only types are allowed.
+- **`indexed` dropped.** If the ABI declares `address indexed owner`, write
+  `address indexed owner` in the manifest. The topic layout changes, so the
+  decoder fails without it.
+
+`graph build` catches most of these. If the build passes but events never
+arrive, open the ABI JSON in `abis/` and compare each parameter in order.
+
+### Reverted contract calls
+
+Reading contract state inside a handler, for example `contract.balanceOf()`,
+can revert at specific blocks. A plain call aborts the handler. Use the
+generated `try_` variant and handle the reverted case:
+
+```ts
+let result = contract.try_gravatarToOwner(event.params.id)
+if (result.reverted) {
+  log.info('gravatarToOwner reverted for {}', [event.params.id.toString()])
+  return
+}
+let owner = result.value
+```
+
+Contract calls are also the main reason subgraphs index slowly. If the value
+you need is already in an event parameter, use that instead of calling the
+contract.
+
+### Deploy rejected
+
+`graph deploy` returns `Unauthorized` or `Subgraph not found` when either
+the key or the slug is wrong.
+
+1. Open the subgraph page in Studio and copy the **Deploy Key** again. Keys
+   are per account and can be regenerated, which invalidates the old one.
+2. Run `graph auth <DEPLOY_KEY>` again.
+3. Deploy with the **slug** exactly as Studio shows it. The display name
+   `Gravity Mainnet` is not the slug; `gravity-mainnet` is.
+
+### Missing early data
+
+If `health` is `healthy` and the subgraph is synced but early entities are
+absent, the start block is after the events you expected. Check
+`dataSources[0].source.startBlock` in `subgraph.yaml` against the
+contract's creation block on the block explorer.
+
+Lowering the start block requires a redeploy and a full resync from the new
+block. There is no way to backfill in place.
+
+## Step 3: Reproduce and redeploy
+
+Once you have a fix:
+
+```bash
+graph codegen && graph build
+graph deploy <SLUG>
+```
+
+Give the new version a bumped label, for example `v0.0.2`. Studio archives
+the previous version automatically. Then rerun the status query from Step 1
+every minute or so and watch `latestBlock` pass the block recorded in
+`fatalError.block.number`. If it passes that block and `health` stays
+`healthy`, the fix worked.
+
+<Accordion title="Reproduce a failure at a specific block without a full resync">
+  For subgraphs that fail millions of blocks after the start block, a full
+  resync on every attempt is too slow. Run a local Graph Node with
+  `--fork-base https://api.thegraph.com/subgraphs/id/`, set `startBlock` in
+  the manifest to the failing block, and deploy locally with:
+
+  ```bash
+  graph deploy <SLUG> \
+    --debug-fork <DEPLOYMENT_ID> \
+    --ipfs http://localhost:5001 \
+    --node http://localhost:8020
+  ```
+
+  The local node lazily fetches entity state from the remote deployment, so
+  you can iterate on the handler at exactly the failing block. See
+  [subgraph debug forking](https://thegraph.com/docs/en/subgraphs/guides/subgraph-debug-forking/)
+  in the official docs for the full local node setup.
+</Accordion>
+
+## Troubleshooting
+
+<Accordion title="The status query returns an empty indexingStatuses array">
+  The deployment ID is wrong or the subgraph was archived. Deployment IDs
+  are per version; copy the one for the current version from Studio, not
+  from an older `graph deploy` run.
+</Accordion>
+
+<Accordion title="health is unhealthy but not failed">
+  Non-fatal errors were recorded. These come from handlers that threw inside
+  a block the node was told to tolerate. Read `nonFatalErrors[].message`;
+  the fixes above apply. Non-fatal errors are a warning sign, not a
+  stopped subgraph.
+</Accordion>
+
+<Accordion title="fatalError.deterministic is false">
+  The failure came from infrastructure, usually an RPC timeout or a
+  reorg. Redeploying the same build with a new version label often clears
+  it. If it recurs at the same block, treat it as deterministic and
+  inspect the handler.
+</Accordion>
+
+<Accordion title="Build passes locally but deploy fails with a compile error">
+  Your local `graph-cli` and the version pinned in `package.json` differ.
+  Run `npx graph build` from the project directory so the project's own
+  version is used, and align the global install with
+  `npm install -g @graphprotocol/graph-cli@<version>`.
+</Accordion>
